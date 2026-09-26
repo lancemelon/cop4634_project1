@@ -1,39 +1,56 @@
+#include <cstdio>
 #include <cstring>
-#include "parse.hpp"
 
-void parseLine(char* line, Param& paramObj) {
-    // Tokenize by spaces, tabs, and newlines using strtok(3)
-    char* token = strtok(line, " \t\n");
-    
-    while (token != nullptr) {
-        // Check for input redirection
-        if (token[0] == '<') {
-            if (strlen(token) > 1) {
-                paramObj.setInputRedirect(token + 1); // No space: <file
-            } else {
-                token = strtok(nullptr, " \t\n");     // Space: < file
-                if (token) paramObj.setInputRedirect(token);
+#include "parse.hpp"
+#include "param.hpp"
+
+static const char *DELIMITERS = " \t\n";
+
+/*
+ * See parse.hpp.
+ */
+bool parseCommand(char *line, Param &param)
+{
+    char *token = strtok(line, DELIMITERS);
+
+    while (token != NULL)
+    {
+        if (token[0] == '<')
+        {
+            if (token[1] == '\0')
+            {
+                fprintf(stderr,
+                        "myshell: syntax error: expected file name after '<'\n");
+                return false;
+            }
+            param.setInputRedirect(token + 1);
+        }
+        else if (token[0] == '>')
+        {
+            if (token[1] == '\0')
+            {
+                fprintf(stderr,
+                        "myshell: syntax error: expected file name after '>'\n");
+                return false;
+            }
+            param.setOutputRedirect(token + 1);
+        }
+        else if (strcmp(token, "&") == 0)
+        {
+            param.setBackground(1);
+        }
+        else
+        {
+            if (!param.addArgument(token))
+            {
+                fprintf(stderr,
+                        "myshell: too many arguments (max %d)\n", MAXARGS);
+                return false;
             }
         }
-        // Check for output redirection
-        else if (token[0] == '>') {
-            if (strlen(token) > 1) {
-                paramObj.setOutputRedirect(token + 1); // No space: >file
-            } else {
-                token = strtok(nullptr, " \t\n");      // Space: > file
-                if (token) paramObj.setOutputRedirect(token);
-            }
-        }
-        // Check for background operator
-        else if (strcmp(token, "&") == 0) {
-            paramObj.setBackground(1);
-        }
-        // Standard command or argument
-        else {
-            paramObj.addArgument(token);
-        }
-        
-        // Grab the next token
-        token = strtok(nullptr, " \t\n");
+
+        token = strtok(NULL, DELIMITERS);
     }
+
+    return true;
 }

@@ -1,9 +1,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <unistd.h>      // Added for fork(), execvp(), dup2(), close()
-#include <sys/wait.h>    // Added for waitpid(), wait()
-#include <fcntl.h>       // Added for open(), O_RDONLY, O_WRONLY, etc.
+#include <unistd.h>      /* fork, execvp */
+#include <sys/wait.h>    /* waitpid, wait */
 
 #include "param.hpp"
 #include "parse.hpp"
@@ -47,53 +46,66 @@ int main(int argc, char *argv[])
 
     while (true)
     {
-        // ZOMBIE PREVENTION: Clean up any background processes that finished 
-        // since the last iteration without blocking the shell.
+        /* reap any background processes that have terminated */
         while (waitpid(-1, NULL, WNOHANG) > 0);
 
         printf("%s", PROMPT);
         fflush(stdout);
 
         ssize_t count = getline(&line, &bufLen, stdin);
+        
         if (count == -1)
         {
+            /* exit gracefully on end of file */
             printf("\n");
             break;
         }
 
+        /* remove the trailing newline character */
+        if (count > 0 && line[count - 1] == '\n') 
+        {
+            line[count - 1] = '\0';
+        }
+
+        /* skip empty input lines */
+        if (strlen(line) == 0) continue;
+
         Param param;
-        if (!parseCommand(line, param))
+        
+        /* parse the input line; skip execution on syntax error */
+        if (!parseCommand(line, param)) 
         {
             continue;
         }
 
-        if (isExitCommand(param))
-        {
-            // EXIT REQUIREMENT: Wait for all running children to terminate before exiting
-            while (wait(NULL) > 0);
-            break;
-        }
-
-        if (param.getArgumentCount() == 0 &&
-            param.getInputRedirect() == NULL &&
-            param.getOutputRedirect() == NULL &&
-            param.getBackground() == 0)
-        {
-            continue;
-        }
-
-        if (debug)
+        if (debug) 
         {
             param.printParams();
         }
 
-        // If there are no actual commands to execute (e.g., just a lone "&"), skip execution
-        if (param.getArgumentCount() == 0)
+        if (isExitCommand(param)) 
+        {
+            /* wait for all child processes to terminate before exiting */
+            while (wait(NULL) > 0);
+            break;
+        }
+
+        /* skip execution if no command was provided */
+        if (param.getArgumentCount() == 0 &&
+            param.getInputRedirect() == NULL &&
+            param.getOutputRedirect() == NULL &&
+            param.getBackground() == 0) 
         {
             continue;
         }
 
-        // --- PART 2: PROCESS CREATION AND EXECUTION ---
+        /* ensure a command exists before attempting execution */
+        if (param.getArgumentCount() == 0) 
+        {
+            continue;
+        }
+
+        /* create a new process to execute the parsed command */
         pid_t pid = fork();
 
         if (pid < 0) 
@@ -102,37 +114,29 @@ int main(int argc, char *argv[])
         } 
         else if (pid == 0) 
         {
-            // ---> CHILD PROCESS <---
+            /* child process */
             
-            // 1. Input Redirection
+            /* handle input redirection using freopen as required by part 2 */
             if (param.getInputRedirect() != NULL) 
             {
-                int fd_in = open(param.getInputRedirect(), O_RDONLY);
-                if (fd_in < 0) 
+                if (freopen(param.getInputRedirect(), "r", stdin) == NULL) 
                 {
                     perror("myshell: input redirection failed");
-                    exit(1); // Exit child immediately if file doesn't exist/can't be opened
+                    exit(1);
                 }
-                dup2(fd_in, STDIN_FILENO);
-                close(fd_in);
             }
 
-            // 2. Output Redirection
+            /* handle output redirection using freopen as required by part 2 */
             if (param.getOutputRedirect() != NULL) 
             {
-                // Open for writing, create if it doesn't exist, truncate to 0 if it does.
-                // 0644 sets standard file permissions (rw-r--r--)
-                int fd_out = open(param.getOutputRedirect(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                if (fd_out < 0) 
+                if (freopen(param.getOutputRedirect(), "w", stdout) == NULL) 
                 {
                     perror("myshell: output redirection failed");
                     exit(1);
                 }
-                dup2(fd_out, STDOUT_FILENO);
-                close(fd_out);
             }
 
-            // 3. Execute Command
+            /* execute the parsed command */
             char *const *args = param.getArgumentVector();
             if (execvp(args[0], (char **)args) < 0) 
             {
@@ -142,9 +146,9 @@ int main(int argc, char *argv[])
         } 
         else 
         {
-            // ---> PARENT PROCESS <---
+            /* parent process */
             
-            // Wait for the child if it is NOT a background process
+            /* wait for the foreground child process to complete */
             if (param.getBackground() == 0) 
             {
                 waitpid(pid, NULL, 0);
